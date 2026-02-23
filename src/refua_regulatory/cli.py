@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--campaign-run",
         type=Path,
         required=True,
-        help="Path to refua-campaign JSON output.",
+        help="Path to campaign JSON output.",
     )
     build_parser.add_argument(
         "--output-dir",
@@ -40,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build_parser.add_argument(
         "--source-kind",
-        default="refua-campaign",
-        help="Source system label (e.g. refua-campaign, refua-studio).",
+        default="refua-studio",
+        help="Source system label (e.g. refua-studio).",
     )
     build_parser.add_argument(
         "--bundle-id",

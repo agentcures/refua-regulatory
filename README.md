@@ -5,7 +5,7 @@ It helps teams follow drug regulation processes by turning campaign decisions an
 
 ## What it provides
 
-- Campaign decision extraction from `refua-campaign` run outputs.
+- Campaign decision extraction from campaign run outputs.
 - Structured decision records (`decisions.jsonl`) with deterministic decision IDs.
 - Model and data provenance capture per campaign decision.
 - Lineage graph materialization (`lineage.json`) for traceability.

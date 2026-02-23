@@ -45,7 +45,7 @@ def build_evidence_bundle(
     *,
     campaign_run_path: Path,
     output_dir: Path,
-    source_kind: str = "refua-campaign",
+    source_kind: str = "refua-studio",
     bundle_id: str | None = None,
     data_manifest_paths: list[Path] | None = None,
     extra_artifacts: list[Path] | None = None,
