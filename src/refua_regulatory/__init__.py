@@ -10,6 +10,10 @@ from refua_regulatory.checklist import (
     evaluate_regulatory_checklist,
     render_checklist_markdown,
 )
+from refua_regulatory.studio import (
+    build_evidence_bundle_from_payload,
+    verify_bundle_with_summary,
+)
 from refua_regulatory.extractors import (
     extract_decisions_from_campaign,
     extract_model_provenance,
@@ -42,7 +46,9 @@ __version__ = _resolve_version()
 
 __all__ = [
     "build_evidence_bundle",
+    "build_evidence_bundle_from_payload",
     "verify_evidence_bundle",
+    "verify_bundle_with_summary",
     "load_bundle_summary",
     "available_checklist_templates",
     "evaluate_regulatory_checklist",
