@@ -136,13 +136,17 @@ def evaluate_regulatory_checklist(
 ) -> dict[str, Any]:
     if template not in _TEMPLATES:
         available = ", ".join(available_checklist_templates())
-        raise ValueError(f"Unknown checklist template '{template}'. Available: {available}")
+        raise ValueError(
+            f"Unknown checklist template '{template}'. Available: {available}"
+        )
 
     resolved_dir = bundle_dir.expanduser().resolve()
     manifest = _safe_read_json_object(resolved_dir / "manifest.json")
     lineage = _safe_read_json_object(resolved_dir / "lineage.json")
     decisions = _load_decisions(resolved_dir / "decisions.jsonl")
-    campaign_run = _safe_read_json_object(resolved_dir / "artifacts" / "campaign_run.json")
+    campaign_run = _safe_read_json_object(
+        resolved_dir / "artifacts" / "campaign_run.json"
+    )
     verification = verify_evidence_bundle(resolved_dir)
 
     context = _ChecklistContext(
@@ -275,7 +279,9 @@ def _build_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         1 for item in items if item.get("automated") and item.get("status") == "fail"
     )
     auto_manual = sum(
-        1 for item in items if item.get("automated") and item.get("status") == "manual_review"
+        1
+        for item in items
+        if item.get("automated") and item.get("status") == "manual_review"
     )
 
     blocking_failed = sum(
@@ -363,7 +369,9 @@ def _check_bundle_structure(context: _ChecklistContext) -> dict[str, Any]:
         "checksums.sha256",
         "artifacts/campaign_run.json",
     )
-    missing = [name for name in required if not context.bundle_dir.joinpath(name).exists()]
+    missing = [
+        name for name in required if not context.bundle_dir.joinpath(name).exists()
+    ]
     if missing:
         return {
             "status": "fail",
@@ -486,8 +494,12 @@ def _check_traceability(context: _ChecklistContext) -> dict[str, Any]:
             "evidence": [f"decision_count={context.decision_count}"],
         }
 
-    lineage_nodes = context.lineage.get("nodes") if isinstance(context.lineage, dict) else None
-    lineage_edges = context.lineage.get("edges") if isinstance(context.lineage, dict) else None
+    lineage_nodes = (
+        context.lineage.get("nodes") if isinstance(context.lineage, dict) else None
+    )
+    lineage_edges = (
+        context.lineage.get("edges") if isinstance(context.lineage, dict) else None
+    )
     node_count = len(lineage_nodes) if isinstance(lineage_nodes, list) else 0
     edge_count = len(lineage_edges) if isinstance(lineage_edges, list) else 0
 
@@ -567,9 +579,13 @@ def _check_execution_provenance(context: _ChecklistContext) -> dict[str, Any]:
     runtime = execution.get("runtime")
     git = execution.get("git")
     dependencies = execution.get("dependencies")
-    if not isinstance(runtime, dict) or not isinstance(git, dict) or not isinstance(
-        dependencies,
-        dict,
+    if (
+        not isinstance(runtime, dict)
+        or not isinstance(git, dict)
+        or not isinstance(
+            dependencies,
+            dict,
+        )
     ):
         return {
             "status": "fail",

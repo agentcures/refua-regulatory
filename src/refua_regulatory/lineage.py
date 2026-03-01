@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from refua_regulatory.models import ArtifactRef, DataProvenance, DecisionRecord, ModelProvenance
+from refua_regulatory.models import (
+    ArtifactRef,
+    DataProvenance,
+    DecisionRecord,
+    ModelProvenance,
+)
 
 
 def build_lineage_graph(

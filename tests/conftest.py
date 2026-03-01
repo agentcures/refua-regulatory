@@ -12,7 +12,7 @@ def sample_campaign_run_payload() -> dict[str, Any]:
     return {
         "objective": "Design an initial campaign against KRAS G12D",
         "system_prompt": "You are Refua Campaign.",
-        "planner_response_text": "{\"calls\": [...]} ",
+        "planner_response_text": '{"calls": [...]} ',
         "plan": {
             "calls": [
                 {
@@ -113,7 +113,10 @@ def sample_autonomous_payload() -> dict[str, Any]:
         ],
         "final_plan": {
             "calls": [
-                {"tool": "refua_validate_spec", "args": {"action": "fold", "name": "auto1"}},
+                {
+                    "tool": "refua_validate_spec",
+                    "args": {"action": "fold", "name": "auto1"},
+                },
                 {"tool": "refua_affinity", "args": {"name": "auto1", "binder": "lig"}},
             ]
         },
@@ -133,9 +136,13 @@ def sample_autonomous_payload() -> dict[str, Any]:
 
 
 @pytest.fixture()
-def sample_campaign_run_file(tmp_path: Path, sample_campaign_run_payload: dict[str, Any]) -> Path:
+def sample_campaign_run_file(
+    tmp_path: Path, sample_campaign_run_payload: dict[str, Any]
+) -> Path:
     path = tmp_path / "campaign_run.json"
-    path.write_text(json.dumps(sample_campaign_run_payload, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(sample_campaign_run_payload, indent=2) + "\n", encoding="utf-8"
+    )
     return path
 
 

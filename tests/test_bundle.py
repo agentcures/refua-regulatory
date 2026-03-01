@@ -33,7 +33,9 @@ def test_build_and_verify_bundle(
     assert output_dir.joinpath("decisions.jsonl").exists()
     assert output_dir.joinpath("lineage.json").exists()
     assert output_dir.joinpath("checksums.sha256").exists()
-    assert output_dir.joinpath("checklists", "drug_discovery_comprehensive.json").exists()
+    assert output_dir.joinpath(
+        "checklists", "drug_discovery_comprehensive.json"
+    ).exists()
     assert output_dir.joinpath("checklists", "drug_discovery_comprehensive.md").exists()
 
     verification = verify_evidence_bundle(output_dir)
@@ -41,7 +43,9 @@ def test_build_and_verify_bundle(
     assert verification.checked_files > 0
 
 
-def test_verify_detects_tampering(sample_campaign_run_file: Path, tmp_path: Path) -> None:
+def test_verify_detects_tampering(
+    sample_campaign_run_file: Path, tmp_path: Path
+) -> None:
     output_dir = tmp_path / "bundle"
     build_evidence_bundle(
         campaign_run_path=sample_campaign_run_file,
@@ -49,7 +53,9 @@ def test_verify_detects_tampering(sample_campaign_run_file: Path, tmp_path: Path
     )
 
     tampered = output_dir / "artifacts" / "campaign_run.json"
-    tampered.write_text(tampered.read_text(encoding="utf-8") + "\n#tampered\n", encoding="utf-8")
+    tampered.write_text(
+        tampered.read_text(encoding="utf-8") + "\n#tampered\n", encoding="utf-8"
+    )
 
     verification = verify_evidence_bundle(output_dir)
     assert not verification.ok

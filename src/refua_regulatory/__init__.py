@@ -4,7 +4,11 @@ from importlib.metadata import version as _distribution_version
 from pathlib import Path
 import tomllib
 
-from refua_regulatory.bundle import build_evidence_bundle, load_bundle_summary, verify_evidence_bundle
+from refua_regulatory.bundle import (
+    build_evidence_bundle,
+    load_bundle_summary,
+    verify_evidence_bundle,
+)
 from refua_regulatory.checklist import (
     available_checklist_templates,
     evaluate_regulatory_checklist,

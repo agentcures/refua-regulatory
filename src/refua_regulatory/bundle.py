@@ -62,7 +62,9 @@ def build_evidence_bundle(
     output_dir = output_dir.expanduser().resolve()
     data_manifest_paths = list(data_manifest_paths or [])
     extra_artifacts = list(extra_artifacts or [])
-    resolved_checklist_templates = list(checklist_templates or _DEFAULT_CHECKLIST_TEMPLATES)
+    resolved_checklist_templates = list(
+        checklist_templates or _DEFAULT_CHECKLIST_TEMPLATES
+    )
 
     if not campaign_run_path.exists() or not campaign_run_path.is_file():
         raise ValueError(f"Campaign run file does not exist: {campaign_run_path}")
@@ -152,9 +154,11 @@ def build_evidence_bundle(
     checklist_reports: tuple[str, ...] = ()
     checklist_summary: dict[str, Any] = {}
     if include_checklists and resolved_checklist_templates:
-        checklist_payloads, checklist_reports, checklist_summary = _generate_checklist_reports(
-            output_dir=output_dir,
-            templates=resolved_checklist_templates,
+        checklist_payloads, checklist_reports, checklist_summary = (
+            _generate_checklist_reports(
+                output_dir=output_dir,
+                templates=resolved_checklist_templates,
+            )
         )
         _enforce_checklist_policy(
             reports=checklist_payloads,
@@ -260,7 +264,10 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
         if decision_path.exists():
             observed_decisions = _count_jsonl_lines(decision_path)
             declared_decisions = manifest_payload.get("decision_count")
-            if isinstance(declared_decisions, int) and declared_decisions != observed_decisions:
+            if (
+                isinstance(declared_decisions, int)
+                and declared_decisions != observed_decisions
+            ):
                 errors.append(
                     "Decision count mismatch: "
                     f"manifest={declared_decisions}, decisions.jsonl={observed_decisions}"
@@ -300,7 +307,9 @@ def load_bundle_summary(bundle_dir: Path) -> dict[str, Any]:
             manifest.get("checklist_summary") if isinstance(manifest, dict) else {}
         ),
         "verification": to_plain_data(verification),
-        "warnings_preview": truncate_preview(manifest.get("warnings", []), max_chars=400),
+        "warnings_preview": truncate_preview(
+            manifest.get("warnings", []), max_chars=400
+        ),
     }
 
 
@@ -463,7 +472,9 @@ def _write_checksums(bundle_dir: Path) -> None:
 
 def _parse_checksum_file(path: Path) -> list[tuple[str, str]]:
     entries: list[tuple[str, str]] = []
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         line = raw_line.strip()
         if not line:
             continue
@@ -538,14 +549,22 @@ def _generate_checklist_reports(
             item["template"] for item in template_summaries if int(item["failed"]) > 0
         ],
         "manual_review_templates": [
-            item["template"] for item in template_summaries if int(item["manual_review"]) > 0
+            item["template"]
+            for item in template_summaries
+            if int(item["manual_review"]) > 0
         ],
         "blocking_failed_templates": [
-            item["template"] for item in template_summaries if int(item["blocking_failed"]) > 0
+            item["template"]
+            for item in template_summaries
+            if int(item["blocking_failed"]) > 0
         ],
     }
 
-    return reports, tuple(rel_paths), {"templates": template_summaries, "aggregate": aggregate}
+    return (
+        reports,
+        tuple(rel_paths),
+        {"templates": template_summaries, "aggregate": aggregate},
+    )
 
 
 def _enforce_checklist_policy(
@@ -575,7 +594,8 @@ def _enforce_checklist_policy(
     errors: list[str] = []
     if failed_templates:
         errors.append(
-            "Checklist strict mode failed for templates: " + ", ".join(sorted(failed_templates))
+            "Checklist strict mode failed for templates: "
+            + ", ".join(sorted(failed_templates))
         )
     if manual_templates:
         errors.append(

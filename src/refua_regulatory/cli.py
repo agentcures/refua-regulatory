@@ -118,7 +118,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify_parser.set_defaults(handler=_cmd_verify)
 
-    summary_parser = sub.add_parser("summary", help="Print summary for an evidence bundle.")
+    summary_parser = sub.add_parser(
+        "summary", help="Print summary for an evidence bundle."
+    )
     summary_parser.add_argument(
         "--bundle-dir",
         type=Path,
@@ -237,7 +239,9 @@ def _cmd_checklist(args: argparse.Namespace) -> int:
 
     summary = report.get("summary", {})
     failed = int(summary.get("failed", 0)) if isinstance(summary, dict) else 0
-    manual_review = int(summary.get("manual_review", 0)) if isinstance(summary, dict) else 0
+    manual_review = (
+        int(summary.get("manual_review", 0)) if isinstance(summary, dict) else 0
+    )
 
     if args.strict and failed > 0:
         return 1

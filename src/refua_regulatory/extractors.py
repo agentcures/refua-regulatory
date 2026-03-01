@@ -22,7 +22,9 @@ _TOOL_TO_MODEL = {
 }
 
 
-def infer_campaign_run_id(payload: dict[str, Any], *, source_path: Path | None = None) -> str:
+def infer_campaign_run_id(
+    payload: dict[str, Any], *, source_path: Path | None = None
+) -> str:
     explicit = payload.get("campaign_run_id") or payload.get("run_id")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()

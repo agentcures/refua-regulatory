@@ -6,7 +6,9 @@ from pathlib import Path
 from refua_regulatory.cli import main
 
 
-def test_cli_build_verify_summary(sample_campaign_run_file: Path, tmp_path: Path) -> None:
+def test_cli_build_verify_summary(
+    sample_campaign_run_file: Path, tmp_path: Path
+) -> None:
     output_dir = tmp_path / "bundle"
 
     rc_build = main(
@@ -40,7 +42,9 @@ def test_cli_verify_fails_for_missing_bundle(tmp_path: Path) -> None:
     assert rc_verify == 1
 
 
-def test_cli_build_overwrite_flag(sample_campaign_run_file: Path, tmp_path: Path) -> None:
+def test_cli_build_overwrite_flag(
+    sample_campaign_run_file: Path, tmp_path: Path
+) -> None:
     output_dir = tmp_path / "bundle"
 
     rc_first = main(
@@ -78,7 +82,9 @@ def test_cli_build_overwrite_flag(sample_campaign_run_file: Path, tmp_path: Path
     )
     assert rc_overwrite == 0
 
-    manifest = json.loads(output_dir.joinpath("manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        output_dir.joinpath("manifest.json").read_text(encoding="utf-8")
+    )
     assert isinstance(manifest, dict)
 
 
