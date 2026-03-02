@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import tomllib
 from importlib.metadata import version as _distribution_version
 from pathlib import Path
-import tomllib
 
 from refua_regulatory.bundle import (
     build_evidence_bundle,
@@ -14,15 +14,15 @@ from refua_regulatory.checklist import (
     evaluate_regulatory_checklist,
     render_checklist_markdown,
 )
-from refua_regulatory.studio import (
-    build_evidence_bundle_from_payload,
-    verify_bundle_with_summary,
-)
 from refua_regulatory.extractors import (
     extract_decisions_from_campaign,
     extract_model_provenance,
     infer_campaign_run_id,
     load_data_provenance_from_manifests,
+)
+from refua_regulatory.studio import (
+    build_evidence_bundle_from_payload,
+    verify_bundle_with_summary,
 )
 
 
