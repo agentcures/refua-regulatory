@@ -94,3 +94,66 @@ def test_build_can_disable_auto_checklist(
 
     assert manifest["checklist_reports"] == []
     assert not output_dir.joinpath("checklists").exists()
+
+
+def test_verify_fails_when_bundle_contains_unchecked_extra_file(
+    sample_campaign_run_file: Path,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "bundle"
+    build_evidence_bundle(
+        campaign_run_path=sample_campaign_run_file,
+        output_dir=output_dir,
+        include_checklists=False,
+    )
+
+    unchecked = output_dir / "artifacts" / "injected.txt"
+    unchecked.write_text("tampered\n", encoding="utf-8")
+
+    verification = verify_evidence_bundle(output_dir)
+    assert not verification.ok
+    assert any("missing checksum entries" in item for item in verification.errors)
+
+
+def test_verify_fails_for_empty_checksums_file(
+    sample_campaign_run_file: Path,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "bundle"
+    build_evidence_bundle(
+        campaign_run_path=sample_campaign_run_file,
+        output_dir=output_dir,
+        include_checklists=False,
+    )
+
+    output_dir.joinpath("checksums.sha256").write_text("", encoding="utf-8")
+
+    verification = verify_evidence_bundle(output_dir)
+    assert not verification.ok
+    assert any("contains no file entries" in item for item in verification.errors)
+
+
+def test_build_strict_checklist_failure_still_writes_consistent_bundle(
+    sample_campaign_run_file: Path,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "bundle"
+
+    try:
+        build_evidence_bundle(
+            campaign_run_path=sample_campaign_run_file,
+            output_dir=output_dir,
+            checklist_strict=True,
+            checklist_templates=["core"],
+        )
+    except ValueError as exc:
+        assert "Checklist strict mode failed" in str(exc)
+    else:
+        raise AssertionError("Expected checklist strict mode to fail")
+
+    manifest = json.loads(output_dir.joinpath("manifest.json").read_text(encoding="utf-8"))
+    assert "checklists/core.json" in manifest["checklist_reports"]
+    assert "checklists/core.md" in manifest["checklist_reports"]
+
+    verification = verify_evidence_bundle(output_dir)
+    assert verification.ok

@@ -153,6 +153,7 @@ def build_evidence_bundle(
 
     checklist_reports: tuple[str, ...] = ()
     checklist_summary: dict[str, Any] = {}
+    checklist_policy_error: ValueError | None = None
     if include_checklists and resolved_checklist_templates:
         checklist_payloads, checklist_reports, checklist_summary = (
             _generate_checklist_reports(
@@ -160,11 +161,14 @@ def build_evidence_bundle(
                 templates=resolved_checklist_templates,
             )
         )
-        _enforce_checklist_policy(
-            reports=checklist_payloads,
-            strict=checklist_strict,
-            require_no_manual_review=checklist_require_no_manual_review,
-        )
+        try:
+            _enforce_checklist_policy(
+                reports=checklist_payloads,
+                strict=checklist_strict,
+                require_no_manual_review=checklist_require_no_manual_review,
+            )
+        except ValueError as exc:
+            checklist_policy_error = exc
 
     final_manifest = EvidenceBundleManifest(
         schema_version=BUNDLE_SCHEMA_VERSION,
@@ -187,6 +191,9 @@ def build_evidence_bundle(
     )
     write_json(output_dir / "manifest.json", to_plain_data(final_manifest))
     _write_checksums(output_dir)
+
+    if checklist_policy_error is not None:
+        raise checklist_policy_error
 
     return to_plain_data(final_manifest)
 
@@ -224,12 +231,21 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"Invalid checksums.sha256: {exc}")
 
+    declared_checksum_paths: set[str] = set()
     checked_files = 0
     for digest, rel_path in checksum_entries:
         if rel_path == "checksums.sha256":
             warnings.append("checksums.sha256 should not include itself")
             continue
 
+        if not _is_safe_relative_path(rel_path):
+            errors.append(f"Invalid checksum path outside bundle: {rel_path}")
+            continue
+        if rel_path in declared_checksum_paths:
+            errors.append(f"Duplicate checksum entry for path: {rel_path}")
+            continue
+
+        declared_checksum_paths.add(rel_path)
         target = bundle_dir / rel_path
         if not target.exists() or not target.is_file():
             errors.append(f"Checksum file missing target: {rel_path}")
@@ -242,23 +258,76 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
                 f"Checksum mismatch for {rel_path}: expected {digest}, observed {actual}"
             )
 
+    observed_bundle_files = set(_bundle_file_list(bundle_dir, include_checksums=False))
+    if checksum_path.exists() and not declared_checksum_paths:
+        errors.append("checksums.sha256 contains no file entries")
+
+    unchecked_files = sorted(observed_bundle_files - declared_checksum_paths)
+    if unchecked_files:
+        errors.append(
+            "Bundle contains files missing checksum entries: "
+            + ", ".join(unchecked_files)
+        )
+
+    unexpected_checksum_paths = sorted(declared_checksum_paths - observed_bundle_files)
+    if unexpected_checksum_paths:
+        errors.append(
+            "checksums.sha256 contains paths not present in bundle: "
+            + ", ".join(unexpected_checksum_paths)
+        )
+
     if manifest_payload is not None:
         files_field = manifest_payload.get("files")
+        manifest_files: set[str] = set()
+        manifest_is_valid = True
         if isinstance(files_field, list):
-            missing_from_manifest = []
             for rel_name in files_field:
                 if not isinstance(rel_name, str):
                     errors.append("manifest.files must contain only strings")
+                    manifest_is_valid = False
                     break
-                if not bundle_dir.joinpath(rel_name).exists():
-                    missing_from_manifest.append(rel_name)
-            if missing_from_manifest:
-                errors.append(
-                    "manifest.files contains missing files: "
-                    + ", ".join(sorted(missing_from_manifest))
-                )
+                if not _is_safe_relative_path(rel_name):
+                    errors.append(f"manifest.files contains invalid relative path: {rel_name}")
+                    manifest_is_valid = False
+                    continue
+                manifest_files.add(rel_name)
+
+            if manifest_is_valid:
+                missing_from_manifest = sorted(observed_bundle_files - manifest_files)
+                if missing_from_manifest:
+                    errors.append(
+                        "manifest.files is missing bundle files: "
+                        + ", ".join(missing_from_manifest)
+                    )
+
+                extra_manifest_entries = sorted(manifest_files - observed_bundle_files)
+                if extra_manifest_entries:
+                    errors.append(
+                        "manifest.files contains missing files: "
+                        + ", ".join(extra_manifest_entries)
+                    )
+
         else:
             errors.append("manifest.files must be a list")
+            manifest_is_valid = False
+
+        if (
+            manifest_is_valid
+            and declared_checksum_paths
+            and manifest_files != declared_checksum_paths
+        ):
+            missing_from_checksum = sorted(manifest_files - declared_checksum_paths)
+            missing_from_manifest = sorted(declared_checksum_paths - manifest_files)
+            if missing_from_checksum:
+                errors.append(
+                    "manifest.files entries missing checksum coverage: "
+                    + ", ".join(missing_from_checksum)
+                )
+            if missing_from_manifest:
+                errors.append(
+                    "checksums.sha256 entries missing from manifest.files: "
+                    + ", ".join(missing_from_manifest)
+                )
 
         decision_path = bundle_dir / "decisions.jsonl"
         if decision_path.exists():
@@ -342,12 +411,19 @@ def _copy_and_load_data_manifests(
     records, parse_warnings = load_data_provenance_from_manifests(copied_paths)
     warnings.extend(parse_warnings)
 
+    copied_paths_by_name = {path.name: path for path in copied_paths}
     updated_records: list[DataProvenance] = []
-    for idx, record in enumerate(records, start=1):
-        if idx <= len(copied_paths):
-            rel_path = str(copied_paths[idx - 1].relative_to(output_dir))
-        else:
-            rel_path = None
+    for record in records:
+        rel_path: str | None = None
+        manifest_name = record.metadata.get("manifest_name")
+        if isinstance(manifest_name, str):
+            copied_path = copied_paths_by_name.get(manifest_name)
+            if copied_path is not None:
+                rel_path = str(copied_path.relative_to(output_dir))
+            else:
+                warnings.append(
+                    f"Could not resolve copied manifest path for record: {manifest_name}"
+                )
         updated_records.append(
             DataProvenance(
                 dataset_id=record.dataset_id,
@@ -608,3 +684,12 @@ def _enforce_checklist_policy(
 
 def _safe_int(value: Any) -> int:
     return int(value) if isinstance(value, int) else 0
+
+
+def _is_safe_relative_path(rel_path: str) -> bool:
+    candidate = Path(rel_path)
+    if candidate.is_absolute():
+        return False
+    if ".." in candidate.parts:
+        return False
+    return bool(rel_path.strip())

@@ -87,10 +87,12 @@ def build_lineage_graph(
             }
         )
 
-    artifact_node_ids: list[str] = []
+    artifact_nodes_by_id: dict[str, str] = {}
+    artifact_nodes_by_rel_path: dict[str, str] = {}
     for artifact in artifacts:
         artifact_node_id = f"artifact:{artifact.artifact_id}"
-        artifact_node_ids.append(artifact_node_id)
+        artifact_nodes_by_id[artifact.artifact_id] = artifact_node_id
+        artifact_nodes_by_rel_path[artifact.rel_path] = artifact_node_id
         nodes.append(
             {
                 "id": artifact_node_id,
@@ -162,14 +164,20 @@ def build_lineage_graph(
                     }
                 )
 
-        if decision.decision_type == "tool_result" and artifact_node_ids:
-            edges.append(
-                {
-                    "from": decision_node_id,
-                    "to": artifact_node_ids[0],
-                    "type": "recorded_in",
-                }
+        if decision.decision_type == "tool_result":
+            recorded_artifact_nodes = _resolve_recorded_artifact_nodes(
+                decision,
+                artifact_nodes_by_id=artifact_nodes_by_id,
+                artifact_nodes_by_rel_path=artifact_nodes_by_rel_path,
             )
+            for artifact_node_id in recorded_artifact_nodes:
+                edges.append(
+                    {
+                        "from": decision_node_id,
+                        "to": artifact_node_id,
+                        "type": "recorded_in",
+                    }
+                )
 
     return {
         "graph_version": "1.0.0",
@@ -177,3 +185,50 @@ def build_lineage_graph(
         "nodes": nodes,
         "edges": edges,
     }
+
+
+def _resolve_recorded_artifact_nodes(
+    decision: DecisionRecord,
+    *,
+    artifact_nodes_by_id: dict[str, str],
+    artifact_nodes_by_rel_path: dict[str, str],
+) -> list[str]:
+    resolved: list[str] = []
+    seen_node_ids: set[str] = set()
+    refs = [*decision.output_refs, *decision.input_refs]
+
+    for ref in refs:
+        for candidate in _artifact_ref_candidates(ref):
+            node_id = artifact_nodes_by_id.get(candidate)
+            if node_id is None:
+                node_id = artifact_nodes_by_rel_path.get(candidate)
+            if node_id is None or node_id in seen_node_ids:
+                continue
+            seen_node_ids.add(node_id)
+            resolved.append(node_id)
+            break
+
+    return resolved
+
+
+def _artifact_ref_candidates(ref: str) -> tuple[str, ...]:
+    candidates: list[str] = []
+    value = ref.strip()
+    if not value:
+        return ()
+
+    candidates.append(value)
+    if value.startswith("artifact:"):
+        artifact_ref = value.split(":", maxsplit=1)[1].strip()
+        if artifact_ref:
+            candidates.append(artifact_ref)
+            candidates.append(artifact_ref.replace(":", "_"))
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return tuple(deduped)
