@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "refua-regulatory"
-version = "0.6.0"
+version = "0.7.0"
 description = "Regulatory and audit evidence packaging for Refua campaign decisions."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
