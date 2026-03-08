@@ -18,7 +18,7 @@ def build_evidence_bundle_from_payload(
     *,
     campaign_run: Mapping[str, Any],
     output_dir: Path,
-    source_kind: str = "refua-studio",
+    source_kind: str = "clawcures-ui",
     data_manifest_paths: list[Path] | None = None,
     extra_artifacts: list[Path] | None = None,
     include_checklists: bool = True,

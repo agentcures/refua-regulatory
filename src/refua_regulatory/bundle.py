@@ -45,7 +45,7 @@ def build_evidence_bundle(
     *,
     campaign_run_path: Path,
     output_dir: Path,
-    source_kind: str = "refua-studio",
+    source_kind: str = "clawcures-ui",
     bundle_id: str | None = None,
     data_manifest_paths: list[Path] | None = None,
     extra_artifacts: list[Path] | None = None,

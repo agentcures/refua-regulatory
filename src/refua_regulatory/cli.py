@@ -40,8 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build_parser.add_argument(
         "--source-kind",
-        default="refua-studio",
-        help="Source system label (e.g. refua-studio).",
+        default="clawcures-ui",
+        help="Source system label (e.g. clawcures-ui).",
     )
     build_parser.add_argument(
         "--bundle-id",
