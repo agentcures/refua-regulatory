@@ -34,6 +34,9 @@ class _ChecklistContext:
     verification_ok: bool
     verification_errors: tuple[str, ...]
     verification_warnings: tuple[str, ...]
+    plan_call_entries: tuple[dict[str, Any], ...]
+    tool_result_entries: tuple[dict[str, Any], ...]
+    tool_result_key_set: frozenset[str]
 
     @property
     def decision_count(self) -> int:
@@ -67,45 +70,27 @@ class _ChecklistContext:
 
     @property
     def objective(self) -> str:
-        if self.campaign_run is None:
+        campaign_run = self.campaign_run
+        if campaign_run is None:
             return ""
-        value = self.campaign_run.get("objective")
+        value = campaign_run.get("objective")
         return str(value).strip() if isinstance(value, str) else ""
 
     @property
     def planner_response_text(self) -> str:
-        if self.campaign_run is None:
+        campaign_run = self.campaign_run
+        if campaign_run is None:
             return ""
-        value = self.campaign_run.get("planner_response_text")
+        value = campaign_run.get("planner_response_text")
         return str(value).strip() if isinstance(value, str) else ""
 
     @property
-    def plan_calls(self) -> list[dict[str, Any]]:
-        if self.campaign_run is None:
-            return []
-
-        final_plan = self.campaign_run.get("final_plan")
-        if isinstance(final_plan, dict):
-            calls = final_plan.get("calls")
-            if isinstance(calls, list):
-                return [item for item in calls if isinstance(item, dict)]
-
-        plan = self.campaign_run.get("plan")
-        if isinstance(plan, dict):
-            calls = plan.get("calls")
-            if isinstance(calls, list):
-                return [item for item in calls if isinstance(item, dict)]
-
-        return []
+    def plan_calls(self) -> tuple[dict[str, Any], ...]:
+        return self.plan_call_entries
 
     @property
-    def tool_results(self) -> list[dict[str, Any]]:
-        if self.campaign_run is None:
-            return []
-        results = self.campaign_run.get("results")
-        if not isinstance(results, list):
-            return []
-        return [item for item in results if isinstance(item, dict)]
+    def tool_results(self) -> tuple[dict[str, Any], ...]:
+        return self.tool_result_entries
 
     @property
     def first_tool(self) -> str | None:
@@ -116,9 +101,17 @@ class _ChecklistContext:
         return tool if isinstance(tool, str) else None
 
     @property
+    def first_executed_tool(self) -> str | None:
+        for item in self.tool_results:
+            tool = item.get("tool")
+            if isinstance(tool, str) and tool.strip():
+                return tool
+        return None
+
+    @property
     def tools_used(self) -> list[str]:
         names: list[str] = []
-        for call in self.plan_calls:
+        for call in self.plan_call_entries:
             tool = call.get("tool")
             if isinstance(tool, str):
                 names.append(tool)
@@ -134,12 +127,12 @@ def evaluate_regulatory_checklist(
     *,
     template: str = "core",
 ) -> dict[str, Any]:
-    if template not in _TEMPLATES:
-        available = ", ".join(available_checklist_templates())
-        raise ValueError(
-            f"Unknown checklist template '{template}'. Available: {available}"
-        )
+    resolved_dir = bundle_dir.expanduser().resolve()
+    context = _load_checklist_context(resolved_dir)
+    return _evaluate_regulatory_checklist_from_context(context, template=template)
 
+
+def _load_checklist_context(bundle_dir: Path) -> _ChecklistContext:
     resolved_dir = bundle_dir.expanduser().resolve()
     manifest = _safe_read_json_object(resolved_dir / "manifest.json")
     lineage = _safe_read_json_object(resolved_dir / "lineage.json")
@@ -148,8 +141,10 @@ def evaluate_regulatory_checklist(
         resolved_dir / "artifacts" / "campaign_run.json"
     )
     verification = verify_evidence_bundle(resolved_dir)
+    plan_calls = _extract_plan_calls(campaign_run)
+    tool_results = _extract_tool_results(campaign_run)
 
-    context = _ChecklistContext(
+    return _ChecklistContext(
         bundle_dir=resolved_dir,
         manifest=manifest,
         lineage=lineage,
@@ -158,7 +153,22 @@ def evaluate_regulatory_checklist(
         verification_ok=verification.ok,
         verification_errors=verification.errors,
         verification_warnings=verification.warnings,
+        plan_call_entries=plan_calls,
+        tool_result_entries=tool_results,
+        tool_result_key_set=frozenset(_collect_tool_result_keys(tool_results)),
     )
+
+
+def _evaluate_regulatory_checklist_from_context(
+    context: _ChecklistContext,
+    *,
+    template: str = "core",
+) -> dict[str, Any]:
+    if template not in _TEMPLATES:
+        available = ", ".join(available_checklist_templates())
+        raise ValueError(
+            f"Unknown checklist template '{template}'. Available: {available}"
+        )
 
     items: list[dict[str, Any]] = []
     for check in _TEMPLATES[template]:
@@ -178,11 +188,12 @@ def evaluate_regulatory_checklist(
         items.append(item)
 
     summary = _build_summary(items)
+    manifest = context.manifest
     report = {
         "schema_version": "1.1.0",
         "template": template,
         "generated_at": utcnow_iso(),
-        "bundle_dir": str(resolved_dir),
+        "bundle_dir": str(context.bundle_dir),
         "bundle_id": manifest.get("bundle_id") if isinstance(manifest, dict) else None,
         "campaign_run_id": (
             manifest.get("campaign_run_id") if isinstance(manifest, dict) else None
@@ -256,17 +267,59 @@ def _load_decisions(path: Path) -> list[dict[str, Any]]:
         return []
 
     decisions: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        raw = line.strip()
-        if not raw:
-            continue
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            decisions.append(payload)
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                decisions.append(payload)
     return decisions
+
+
+def _extract_plan_calls(
+    campaign_run: dict[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    if campaign_run is None:
+        return ()
+
+    final_plan = campaign_run.get("final_plan")
+    if isinstance(final_plan, dict):
+        calls = final_plan.get("calls")
+        if isinstance(calls, list):
+            return tuple(item for item in calls if isinstance(item, dict))
+
+    plan = campaign_run.get("plan")
+    if isinstance(plan, dict):
+        calls = plan.get("calls")
+        if isinstance(calls, list):
+            return tuple(item for item in calls if isinstance(item, dict))
+
+    return ()
+
+
+def _extract_tool_results(
+    campaign_run: dict[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    if campaign_run is None:
+        return ()
+    results = campaign_run.get("results")
+    if not isinstance(results, list):
+        return ()
+    return tuple(item for item in results if isinstance(item, dict))
+
+
+def _collect_tool_result_keys(
+    results: tuple[dict[str, Any], ...],
+) -> set[str]:
+    keys: set[str] = set()
+    for item in results:
+        keys.update(_flatten_keys(item.get("output")))
+    return keys
 
 
 def _build_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -437,7 +490,31 @@ def _check_executable_plan_present(context: _ChecklistContext) -> dict[str, Any]
 
 
 def _check_validation_first_policy(context: _ChecklistContext) -> dict[str, Any]:
-    first_tool = context.first_tool
+    executed_first_tool = context.first_executed_tool
+    planned_first_tool = context.first_tool
+
+    if executed_first_tool is not None:
+        if executed_first_tool == "refua_validate_spec":
+            return {
+                "status": "pass",
+                "details": "Executed tool order satisfies validation-first policy.",
+                "recommendation": "",
+                "evidence": [
+                    f"first_executed_tool={executed_first_tool}",
+                    f"planned_first_tool={planned_first_tool}",
+                ],
+            }
+        return {
+            "status": "fail",
+            "details": "Execution did not start with `refua_validate_spec`.",
+            "recommendation": "Run validate_spec before fold/affinity execution.",
+            "evidence": [
+                f"first_executed_tool={executed_first_tool}",
+                f"planned_first_tool={planned_first_tool}",
+            ],
+        }
+
+    first_tool = planned_first_tool
     if first_tool is None:
         return {
             "status": "fail",
@@ -448,15 +525,15 @@ def _check_validation_first_policy(context: _ChecklistContext) -> dict[str, Any]
     if first_tool == "refua_validate_spec":
         return {
             "status": "pass",
-            "details": "Validation-first policy satisfied.",
+            "details": "Planned tool order satisfies validation-first policy.",
             "recommendation": "",
-            "evidence": [f"first_tool={first_tool}"],
+            "evidence": [f"planned_first_tool={first_tool}"],
         }
     return {
         "status": "fail",
         "details": "Plan does not start with `refua_validate_spec`.",
         "recommendation": "Run validate_spec before expensive fold/affinity calls.",
-        "evidence": [f"first_tool={first_tool}"],
+        "evidence": [f"planned_first_tool={first_tool}"],
     }
 
 
@@ -627,12 +704,10 @@ def _check_uncertainty_reporting(context: _ChecklistContext) -> dict[str, Any]:
     }
 
     matched: set[str] = set()
-    for item in results:
-        output = item.get("output")
-        keys = _flatten_keys(output)
-        for token in uncertainty_tokens:
-            if any(token in key for key in keys):
-                matched.add(token)
+    keys = context.tool_result_key_set
+    for token in uncertainty_tokens:
+        if any(token in key for key in keys):
+            matched.add(token)
 
     if matched:
         return {
@@ -673,13 +748,11 @@ def _check_safety_signal_capture(context: _ChecklistContext) -> dict[str, Any]:
     }
 
     matched: set[str] = set()
-    for item in results:
-        output = item.get("output")
-        keys = _flatten_keys(output)
-        for token in safety_tokens:
-            token_l = token.lower()
-            if any(token_l in key for key in keys):
-                matched.add(token_l)
+    keys = context.tool_result_key_set
+    for token in safety_tokens:
+        token_l = token.lower()
+        if any(token_l in key for key in keys):
+            matched.add(token_l)
 
     if matched:
         return {

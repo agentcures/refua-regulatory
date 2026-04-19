@@ -7,7 +7,7 @@ from typing import Any
 from refua_regulatory.models import DataProvenance, DecisionRecord, ModelProvenance
 from refua_regulatory.utils import (
     stable_id,
-    to_plain_data,
+    stable_json_dumps,
     truncate_preview,
     utcnow_iso,
 )
@@ -29,10 +29,8 @@ def infer_campaign_run_id(
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
 
-    objective = str(payload.get("objective") or "")
-    planner_text = str(payload.get("planner_response_text") or "")
-    source_key = str(source_path or "")
-    return stable_id("campaign_run", objective, planner_text, source_key)
+    del source_path
+    return stable_id("campaign_run", stable_json_dumps(payload))
 
 
 def extract_decisions_from_campaign(
@@ -111,10 +109,10 @@ def extract_decisions_from_campaign(
     final_plan = payload.get("final_plan")
     if isinstance(final_plan, dict):
         if isinstance(plan, dict):
-            rendered_plan = json.dumps(to_plain_data(plan), sort_keys=True)
+            rendered_plan = stable_json_dumps(plan)
         else:
             rendered_plan = ""
-        rendered_final = json.dumps(to_plain_data(final_plan), sort_keys=True)
+        rendered_final = stable_json_dumps(final_plan)
         if rendered_final != rendered_plan:
             decisions.append(
                 _decision(

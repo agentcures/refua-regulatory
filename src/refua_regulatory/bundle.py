@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ from refua_regulatory.extractors import (
     infer_campaign_run_id,
     load_data_provenance_from_manifests,
 )
-from refua_regulatory.lineage import build_lineage_graph
+from refua_regulatory.lineage import LINEAGE_GRAPH_VERSION, build_lineage_graph
 from refua_regulatory.models import (
     ArtifactRef,
     DataProvenance,
@@ -19,6 +20,7 @@ from refua_regulatory.models import (
 )
 from refua_regulatory.provenance import collect_execution_provenance
 from refua_regulatory.utils import (
+    copy_file_with_metadata,
     list_bundle_files,
     read_json_object,
     sha256_file,
@@ -27,7 +29,9 @@ from refua_regulatory.utils import (
     truncate_preview,
     utcnow_iso,
     write_json,
-    write_jsonl,
+    write_json_with_metadata,
+    write_jsonl_with_metadata,
+    write_text_with_metadata,
 )
 
 BUNDLE_SCHEMA_VERSION = "1.0.0"
@@ -39,6 +43,57 @@ _REQUIRED_BUNDLE_FILES = (
     "lineage.json",
     "checksums.sha256",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _InventoryRecord:
+    sha256: str
+    size_bytes: int
+
+
+class _BundleInventory:
+    def __init__(self, bundle_dir: Path) -> None:
+        self.bundle_dir = bundle_dir
+        self._records: dict[str, _InventoryRecord] = {}
+
+    def write_json(self, path: Path, payload: dict[str, Any]) -> None:
+        digest, size_bytes = write_json_with_metadata(path, payload)
+        self._register(path, digest=digest, size_bytes=size_bytes)
+
+    def write_jsonl(self, path: Path, items: list[dict[str, Any]]) -> None:
+        digest, size_bytes = write_jsonl_with_metadata(path, items)
+        self._register(path, digest=digest, size_bytes=size_bytes)
+
+    def write_text(self, path: Path, content: str) -> None:
+        digest, size_bytes = write_text_with_metadata(path, content)
+        self._register(path, digest=digest, size_bytes=size_bytes)
+
+    def copy_file(self, source: Path, target: Path) -> tuple[str, int]:
+        digest, size_bytes = copy_file_with_metadata(source, target)
+        self._register(target, digest=digest, size_bytes=size_bytes)
+        return digest, size_bytes
+
+    def files(self, *, include_checksums: bool) -> list[str]:
+        names = sorted(self._records)
+        if include_checksums:
+            return names
+        return [name for name in names if name != "checksums.sha256"]
+
+    def write_checksums(self) -> None:
+        lines = [
+            f"{record.sha256}  {rel_path}\n"
+            for rel_path, record in sorted(self._records.items())
+            if rel_path != "checksums.sha256"
+        ]
+        checksum_path = self.bundle_dir / "checksums.sha256"
+        write_text_with_metadata(checksum_path, "".join(lines))
+
+    def _register(self, path: Path, *, digest: str, size_bytes: int) -> None:
+        rel_path = str(path.relative_to(self.bundle_dir))
+        self._records[rel_path] = _InventoryRecord(
+            sha256=digest,
+            size_bytes=size_bytes,
+        )
 
 
 def build_evidence_bundle(
@@ -56,6 +111,7 @@ def build_evidence_bundle(
     checklist_templates: list[str] | None = None,
     checklist_strict: bool = False,
     checklist_require_no_manual_review: bool = False,
+    provenance_include_sensitive_details: bool = False,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     campaign_run_path = campaign_run_path.expanduser().resolve()
@@ -80,6 +136,7 @@ def build_evidence_bundle(
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir = output_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    inventory = _BundleInventory(output_dir)
 
     payload = read_json_object(campaign_run_path)
     campaign_run_id = infer_campaign_run_id(payload, source_path=campaign_run_path)
@@ -100,17 +157,20 @@ def build_evidence_bundle(
         output_dir=output_dir,
         artifacts_dir=artifacts_dir,
         data_manifest_paths=data_manifest_paths,
+        inventory=inventory,
     )
 
     copied_artifacts, artifact_warnings = _copy_artifacts(
         campaign_run_path=campaign_run_path,
         artifacts_dir=artifacts_dir,
         extra_artifacts=extra_artifacts,
+        inventory=inventory,
     )
 
     execution = collect_execution_provenance(
         cwd=campaign_run_path.parent,
         dependency_names=dependency_names,
+        include_sensitive_details=provenance_include_sensitive_details,
     )
 
     lineage = build_lineage_graph(
@@ -122,10 +182,10 @@ def build_evidence_bundle(
     )
 
     decisions_path = output_dir / "decisions.jsonl"
-    write_jsonl(decisions_path, [to_plain_data(item) for item in decisions])
+    inventory.write_jsonl(decisions_path, [to_plain_data(item) for item in decisions])
 
     lineage_path = output_dir / "lineage.json"
-    write_json(lineage_path, to_plain_data(lineage))
+    inventory.write_json(lineage_path, to_plain_data(lineage))
 
     source_rel_path = str((artifacts_dir / "campaign_run.json").relative_to(output_dir))
 
@@ -140,7 +200,7 @@ def build_evidence_bundle(
         artifact_count=len(copied_artifacts),
         model_count=len(models),
         data_count=len(datasets),
-        files=tuple(_bundle_file_list(output_dir, include_checksums=False)),
+        files=tuple(inventory.files(include_checksums=False)),
         model_provenance=tuple(models),
         data_provenance=tuple(datasets),
         execution_provenance=execution,
@@ -148,8 +208,8 @@ def build_evidence_bundle(
         checklist_summary={},
         warnings=tuple([*data_warnings, *artifact_warnings]),
     )
-    write_json(output_dir / "manifest.json", to_plain_data(bootstrap_manifest))
-    _write_checksums(output_dir)
+    inventory.write_json(output_dir / "manifest.json", to_plain_data(bootstrap_manifest))
+    inventory.write_checksums()
 
     checklist_reports: tuple[str, ...] = ()
     checklist_summary: dict[str, Any] = {}
@@ -159,6 +219,7 @@ def build_evidence_bundle(
             _generate_checklist_reports(
                 output_dir=output_dir,
                 templates=resolved_checklist_templates,
+                inventory=inventory,
             )
         )
         try:
@@ -181,7 +242,7 @@ def build_evidence_bundle(
         artifact_count=len(copied_artifacts),
         model_count=len(models),
         data_count=len(datasets),
-        files=tuple(_bundle_file_list(output_dir, include_checksums=False)),
+        files=tuple(inventory.files(include_checksums=False)),
         model_provenance=tuple(models),
         data_provenance=tuple(datasets),
         execution_provenance=execution,
@@ -189,8 +250,8 @@ def build_evidence_bundle(
         checklist_summary=checklist_summary,
         warnings=tuple([*data_warnings, *artifact_warnings]),
     )
-    write_json(output_dir / "manifest.json", to_plain_data(final_manifest))
-    _write_checksums(output_dir)
+    inventory.write_json(output_dir / "manifest.json", to_plain_data(final_manifest))
+    inventory.write_checksums()
 
     if checklist_policy_error is not None:
         raise checklist_policy_error
@@ -277,6 +338,12 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
         )
 
     if manifest_payload is not None:
+        _validate_manifest_metadata(
+            manifest_payload=manifest_payload,
+            bundle_dir=bundle_dir,
+            errors=errors,
+        )
+
         files_field = manifest_payload.get("files")
         manifest_files: set[str] = set()
         manifest_is_valid = True
@@ -333,14 +400,19 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
         if decision_path.exists():
             observed_decisions = _count_jsonl_lines(decision_path)
             declared_decisions = manifest_payload.get("decision_count")
-            if (
-                isinstance(declared_decisions, int)
-                and declared_decisions != observed_decisions
-            ):
+            if not isinstance(declared_decisions, int):
+                errors.append("manifest.decision_count must be an integer")
+            elif declared_decisions != observed_decisions:
                 errors.append(
                     "Decision count mismatch: "
                     f"manifest={declared_decisions}, decisions.jsonl={observed_decisions}"
                 )
+
+        _validate_lineage_consistency(
+            bundle_dir=bundle_dir,
+            manifest_payload=manifest_payload,
+            errors=errors,
+        )
 
     return VerificationResult(
         ok=(len(errors) == 0),
@@ -387,6 +459,7 @@ def _copy_and_load_data_manifests(
     output_dir: Path,
     artifacts_dir: Path,
     data_manifest_paths: list[Path],
+    inventory: _BundleInventory,
 ) -> tuple[list[DataProvenance], list[str]]:
     if not data_manifest_paths:
         return [], []
@@ -405,7 +478,7 @@ def _copy_and_load_data_manifests(
 
         target_name = f"manifest_{index:03d}_{source.name}"
         target = data_dir / target_name
-        shutil.copy2(source, target)
+        inventory.copy_file(source, target)
         copied_paths.append(target)
 
     records, parse_warnings = load_data_provenance_from_manifests(copied_paths)
@@ -444,12 +517,16 @@ def _copy_artifacts(
     campaign_run_path: Path,
     artifacts_dir: Path,
     extra_artifacts: list[Path],
+    inventory: _BundleInventory,
 ) -> tuple[list[ArtifactRef], list[str]]:
     warnings: list[str] = []
     artifact_refs: list[ArtifactRef] = []
 
     campaign_target = artifacts_dir / "campaign_run.json"
-    shutil.copy2(campaign_run_path, campaign_target)
+    campaign_digest, campaign_size_bytes = inventory.copy_file(
+        campaign_run_path,
+        campaign_target,
+    )
 
     artifact_refs.append(
         _artifact_ref(
@@ -458,6 +535,8 @@ def _copy_artifacts(
             path=campaign_target,
             bundle_dir=artifacts_dir.parent,
             media_type="application/json",
+            sha256=campaign_digest,
+            size_bytes=campaign_size_bytes,
         )
     )
 
@@ -473,7 +552,7 @@ def _copy_artifacts(
 
             target_name = f"extra_{index:03d}_{source.name}"
             target = extras_dir / target_name
-            shutil.copy2(source, target)
+            digest, size_bytes = inventory.copy_file(source, target)
 
             artifact_refs.append(
                 _artifact_ref(
@@ -482,6 +561,8 @@ def _copy_artifacts(
                     path=target,
                     bundle_dir=artifacts_dir.parent,
                     media_type=_guess_media_type(target),
+                    sha256=digest,
+                    size_bytes=size_bytes,
                     metadata={"original_path": str(source)},
                 )
             )
@@ -496,6 +577,8 @@ def _artifact_ref(
     path: Path,
     bundle_dir: Path,
     media_type: str | None,
+    sha256: str,
+    size_bytes: int,
     metadata: dict[str, Any] | None = None,
 ) -> ArtifactRef:
     rel_path = str(path.relative_to(bundle_dir))
@@ -503,8 +586,8 @@ def _artifact_ref(
         artifact_id=artifact_id,
         role=role,
         rel_path=rel_path,
-        sha256=sha256_file(path),
-        size_bytes=path.stat().st_size,
+        sha256=sha256,
+        size_bytes=size_bytes,
         media_type=media_type,
         metadata={} if metadata is None else dict(metadata),
     )
@@ -548,31 +631,34 @@ def _write_checksums(bundle_dir: Path) -> None:
 
 def _parse_checksum_file(path: Path) -> list[tuple[str, str]]:
     entries: list[tuple[str, str]] = []
-    for line_number, raw_line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            digest, rel_path = line.split("  ", maxsplit=1)
-        except ValueError as exc:
-            raise ValueError(f"Invalid checksum format on line {line_number}") from exc
-        digest = digest.strip()
-        rel_path = rel_path.strip()
-        if len(digest) != 64:
-            raise ValueError(f"Invalid checksum digest on line {line_number}")
-        if not rel_path:
-            raise ValueError(f"Invalid checksum path on line {line_number}")
-        entries.append((digest, rel_path))
+    with path.open("r", encoding="utf-8") as handle:
+        lines = enumerate(handle, start=1)
+        for line_number, raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                digest, rel_path = line.split("  ", maxsplit=1)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid checksum format on line {line_number}"
+                ) from exc
+            digest = digest.strip()
+            rel_path = rel_path.strip()
+            if len(digest) != 64:
+                raise ValueError(f"Invalid checksum digest on line {line_number}")
+            if not rel_path:
+                raise ValueError(f"Invalid checksum path on line {line_number}")
+            entries.append((digest, rel_path))
     return entries
 
 
 def _count_jsonl_lines(path: Path) -> int:
     count = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            count += 1
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                count += 1
     return count
 
 
@@ -580,28 +666,35 @@ def _generate_checklist_reports(
     *,
     output_dir: Path,
     templates: list[str],
+    inventory: _BundleInventory | None = None,
 ) -> tuple[list[dict[str, Any]], tuple[str, ...], dict[str, Any]]:
     from refua_regulatory.checklist import (
-        evaluate_regulatory_checklist,
+        _evaluate_regulatory_checklist_from_context,
+        _load_checklist_context,
         render_checklist_markdown,
     )
 
     checklists_dir = output_dir / "checklists"
     checklists_dir.mkdir(parents=True, exist_ok=True)
+    context = _load_checklist_context(output_dir)
 
     reports: list[dict[str, Any]] = []
     rel_paths: list[str] = []
     template_summaries: list[dict[str, Any]] = []
 
     for template in templates:
-        report = evaluate_regulatory_checklist(output_dir, template=template)
+        report = _evaluate_regulatory_checklist_from_context(context, template=template)
         reports.append(report)
 
         json_path = checklists_dir / f"{template}.json"
         md_path = checklists_dir / f"{template}.md"
 
-        write_json(json_path, report)
-        md_path.write_text(render_checklist_markdown(report), encoding="utf-8")
+        if inventory is None:
+            write_json(json_path, report)
+            md_path.write_text(render_checklist_markdown(report), encoding="utf-8")
+        else:
+            inventory.write_json(json_path, report)
+            inventory.write_text(md_path, render_checklist_markdown(report))
 
         rel_paths.append(str(json_path.relative_to(output_dir)))
         rel_paths.append(str(md_path.relative_to(output_dir)))
@@ -684,6 +777,197 @@ def _enforce_checklist_policy(
 
 def _safe_int(value: Any) -> int:
     return int(value) if isinstance(value, int) else 0
+
+
+def _validate_manifest_metadata(
+    *,
+    manifest_payload: dict[str, Any],
+    bundle_dir: Path,
+    errors: list[str],
+) -> None:
+    if manifest_payload.get("schema_version") != BUNDLE_SCHEMA_VERSION:
+        errors.append(
+            "Unsupported manifest schema_version: "
+            f"{manifest_payload.get('schema_version')!r}"
+        )
+
+    for field_name in ("bundle_id", "created_at", "campaign_run_id", "source_kind"):
+        value = manifest_payload.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"manifest.{field_name} must be a non-empty string")
+
+    source_rel_path = manifest_payload.get("source_rel_path")
+    if not isinstance(source_rel_path, str) or not _is_safe_relative_path(source_rel_path):
+        errors.append("manifest.source_rel_path must be a safe relative path")
+    elif not bundle_dir.joinpath(source_rel_path).is_file():
+        errors.append(
+            "manifest.source_rel_path points to a missing file: "
+            f"{source_rel_path}"
+        )
+
+    for field_name in ("artifact_count", "model_count", "data_count"):
+        if not isinstance(manifest_payload.get(field_name), int):
+            errors.append(f"manifest.{field_name} must be an integer")
+
+    model_provenance = manifest_payload.get("model_provenance")
+    if not isinstance(model_provenance, list):
+        errors.append("manifest.model_provenance must be a list")
+    elif isinstance(manifest_payload.get("model_count"), int) and (
+        len(model_provenance) != manifest_payload["model_count"]
+    ):
+        errors.append(
+            "Model count mismatch: "
+            f"manifest={manifest_payload['model_count']}, "
+            f"model_provenance={len(model_provenance)}"
+        )
+
+    data_provenance = manifest_payload.get("data_provenance")
+    if not isinstance(data_provenance, list):
+        errors.append("manifest.data_provenance must be a list")
+    elif isinstance(manifest_payload.get("data_count"), int) and (
+        len(data_provenance) != manifest_payload["data_count"]
+    ):
+        errors.append(
+            "Data count mismatch: "
+            f"manifest={manifest_payload['data_count']}, "
+            f"data_provenance={len(data_provenance)}"
+        )
+
+    execution = manifest_payload.get("execution_provenance")
+    if not isinstance(execution, dict):
+        errors.append("manifest.execution_provenance must be an object")
+    else:
+        runtime = execution.get("runtime")
+        git = execution.get("git")
+        dependencies = execution.get("dependencies")
+        if not isinstance(runtime, dict):
+            errors.append("manifest.execution_provenance.runtime must be an object")
+        if not isinstance(git, dict):
+            errors.append("manifest.execution_provenance.git must be an object")
+        if not isinstance(dependencies, dict):
+            errors.append(
+                "manifest.execution_provenance.dependencies must be an object"
+            )
+
+    checklist_reports = manifest_payload.get("checklist_reports")
+    if not isinstance(checklist_reports, list):
+        errors.append("manifest.checklist_reports must be a list")
+    else:
+        for rel_path in checklist_reports:
+            if not isinstance(rel_path, str) or not _is_safe_relative_path(rel_path):
+                errors.append("manifest.checklist_reports must contain safe relative paths")
+                continue
+            if not bundle_dir.joinpath(rel_path).is_file():
+                errors.append(
+                    "manifest.checklist_reports points to a missing file: "
+                    f"{rel_path}"
+                )
+
+    if not isinstance(manifest_payload.get("checklist_summary"), dict):
+        errors.append("manifest.checklist_summary must be an object")
+
+    warnings = manifest_payload.get("warnings")
+    if not isinstance(warnings, list):
+        errors.append("manifest.warnings must be a list")
+    elif any(not isinstance(item, str) for item in warnings):
+        errors.append("manifest.warnings must contain only strings")
+
+
+def _validate_lineage_consistency(
+    *,
+    bundle_dir: Path,
+    manifest_payload: dict[str, Any],
+    errors: list[str],
+) -> None:
+    lineage_path = bundle_dir / "lineage.json"
+    if not lineage_path.exists():
+        return
+
+    try:
+        lineage_payload = read_json_object(lineage_path)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Invalid lineage.json: {exc}")
+        return
+
+    graph_version = lineage_payload.get("graph_version")
+    if graph_version != LINEAGE_GRAPH_VERSION:
+        errors.append(f"Unsupported lineage graph_version: {graph_version!r}")
+
+    lineage_run_id = lineage_payload.get("campaign_run_id")
+    manifest_run_id = manifest_payload.get("campaign_run_id")
+    if (
+        isinstance(lineage_run_id, str)
+        and isinstance(manifest_run_id, str)
+        and lineage_run_id != manifest_run_id
+    ):
+        errors.append(
+            "Campaign run ID mismatch between manifest and lineage: "
+            f"manifest={manifest_run_id}, lineage={lineage_run_id}"
+        )
+
+    nodes = lineage_payload.get("nodes")
+    edges = lineage_payload.get("edges")
+    if not isinstance(nodes, list):
+        errors.append("lineage.nodes must be a list")
+        return
+    if not isinstance(edges, list):
+        errors.append("lineage.edges must be a list")
+        return
+
+    node_ids: set[str] = set()
+    duplicate_node_ids: set[str] = set()
+    kind_counts = {"artifact": 0, "model": 0, "dataset": 0, "decision": 0}
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            errors.append("lineage.nodes must contain only objects")
+            continue
+        node_id = node.get("id")
+        if not isinstance(node_id, str) or not node_id.strip():
+            errors.append("lineage.nodes entries must contain non-empty string ids")
+            continue
+        if node_id in node_ids:
+            duplicate_node_ids.add(node_id)
+        else:
+            node_ids.add(node_id)
+
+        kind = node.get("kind")
+        if isinstance(kind, str) and kind in kind_counts:
+            kind_counts[kind] += 1
+
+    if duplicate_node_ids:
+        errors.append(
+            "lineage.json contains duplicate node ids: "
+            + ", ".join(sorted(duplicate_node_ids))
+        )
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            errors.append("lineage.edges must contain only objects")
+            continue
+        source = edge.get("from")
+        target = edge.get("to")
+        edge_type = edge.get("type")
+        if not isinstance(edge_type, str) or not edge_type.strip():
+            errors.append("lineage.edges entries must contain a non-empty type")
+        if not isinstance(source, str) or source not in node_ids:
+            errors.append(f"lineage edge references missing source node: {source!r}")
+        if not isinstance(target, str) or target not in node_ids:
+            errors.append(f"lineage edge references missing target node: {target!r}")
+
+    for kind, manifest_key in (
+        ("artifact", "artifact_count"),
+        ("model", "model_count"),
+        ("dataset", "data_count"),
+        ("decision", "decision_count"),
+    ):
+        manifest_value = manifest_payload.get(manifest_key)
+        observed_value = kind_counts[kind]
+        if isinstance(manifest_value, int) and manifest_value != observed_value:
+            errors.append(
+                f"{manifest_key} mismatch: manifest={manifest_value}, "
+                f"lineage_{kind}_nodes={observed_value}"
+            )
 
 
 def _is_safe_relative_path(rel_path: str) -> bool:

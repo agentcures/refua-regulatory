@@ -26,32 +26,38 @@ def collect_execution_provenance(
     cwd: str | Path | None = None,
     dependency_names: list[str] | tuple[str, ...] | None = None,
     extra: Mapping[str, Any] | None = None,
+    include_sensitive_details: bool = False,
 ) -> ExecutionProvenance:
     base_dir = Path(cwd) if cwd is not None else Path.cwd()
     dependency_list = list(dependency_names or _DEFAULT_DEPENDENCIES)
 
     return ExecutionProvenance(
         captured_at=utcnow_iso(),
-        runtime=_runtime_info(),
-        git=_git_info(base_dir),
+        runtime=_runtime_info(include_sensitive_details=include_sensitive_details),
+        git=_git_info(
+            base_dir,
+            include_sensitive_details=include_sensitive_details,
+        ),
         dependencies=_dependency_versions(dependency_list),
         extra={} if extra is None else dict(extra),
     )
 
 
-def _runtime_info() -> dict[str, Any]:
-    return {
+def _runtime_info(*, include_sensitive_details: bool) -> dict[str, Any]:
+    runtime = {
         "python_version": platform.python_version(),
         "python_implementation": platform.python_implementation(),
         "platform": platform.platform(),
         "machine": platform.machine(),
         "processor": platform.processor(),
-        "hostname": socket.gethostname(),
         "cpu_count": os.cpu_count(),
     }
+    if include_sensitive_details:
+        runtime["hostname"] = socket.gethostname()
+    return runtime
 
 
-def _git_info(cwd: Path) -> dict[str, Any]:
+def _git_info(cwd: Path, *, include_sensitive_details: bool) -> dict[str, Any]:
     head = _run_git(["rev-parse", "HEAD"], cwd)
     if head is None:
         return {
@@ -61,12 +67,16 @@ def _git_info(cwd: Path) -> dict[str, Any]:
     root = _run_git(["rev-parse", "--show-toplevel"], cwd)
     status = _run_git(["status", "--porcelain"], cwd)
 
-    return {
+    info: dict[str, Any] = {
         "available": True,
         "commit": head,
-        "root": root,
         "dirty": bool(status),
     }
+    if root:
+        info["repository"] = Path(root).name
+        if include_sensitive_details:
+            info["root"] = root
+    return info
 
 
 def _run_git(args: list[str], cwd: Path) -> str | None:

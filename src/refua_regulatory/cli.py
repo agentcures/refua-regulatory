@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite output directory if it exists and is non-empty.",
     )
+    build_parser.add_argument(
+        "--include-sensitive-provenance",
+        action="store_true",
+        help="Include machine-identifying provenance fields such as hostname and git root.",
+    )
     build_parser.set_defaults(handler=_cmd_build)
 
     verify_parser = sub.add_parser("verify", help="Verify evidence bundle integrity.")
@@ -187,6 +192,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
         checklist_strict=bool(args.checklist_strict),
         checklist_require_no_manual_review=bool(
             args.checklist_require_no_manual_review
+        ),
+        provenance_include_sensitive_details=bool(
+            args.include_sensitive_provenance
         ),
         overwrite=bool(args.overwrite),
     )

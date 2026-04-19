@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,6 +49,10 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
 def stable_id(*parts: str) -> str:
     normalized = "::".join(part.strip() for part in parts)
     return uuid5(NAMESPACE_URL, normalized).hex
@@ -65,6 +70,66 @@ def to_plain_data(value: Any) -> Any:
     return value
 
 
+def stable_json_dumps(value: Any) -> str:
+    return json.dumps(
+        to_plain_data(value),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def write_json_with_metadata(path: Path, payload: dict[str, Any]) -> tuple[str, int]:
+    content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return sha256_bytes(content), len(content)
+
+
+def write_jsonl_with_metadata(
+    path: Path,
+    items: list[dict[str, Any]],
+) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size_bytes = 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        for item in items:
+            line = (json.dumps(item, sort_keys=True) + "\n").encode("utf-8")
+            handle.write(line)
+            digest.update(line)
+            size_bytes += len(line)
+    return digest.hexdigest(), size_bytes
+
+
+def write_text_with_metadata(
+    path: Path,
+    content: str,
+    *,
+    encoding: str = "utf-8",
+) -> tuple[str, int]:
+    payload = content.encode(encoding)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    return sha256_bytes(payload), len(payload)
+
+
+def copy_file_with_metadata(source: Path, target: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size_bytes = 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with source.open("rb") as src_handle, target.open("wb") as dst_handle:
+        while True:
+            chunk = src_handle.read(_CHUNK_SIZE)
+            if not chunk:
+                break
+            dst_handle.write(chunk)
+            digest.update(chunk)
+            size_bytes += len(chunk)
+    shutil.copystat(source, target)
+    return digest.hexdigest(), size_bytes
+
+
 def list_bundle_files(bundle_dir: Path) -> list[Path]:
     files: list[Path] = []
     for path in sorted(bundle_dir.rglob("*")):
@@ -74,7 +139,7 @@ def list_bundle_files(bundle_dir: Path) -> list[Path]:
 
 
 def truncate_preview(value: Any, *, max_chars: int = 1000) -> str:
-    rendered = json.dumps(to_plain_data(value), ensure_ascii=True, sort_keys=True)
+    rendered = stable_json_dumps(value)
     if len(rendered) <= max_chars:
         return rendered
     return rendered[: max_chars - 3] + "..."

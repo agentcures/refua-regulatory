@@ -9,6 +9,8 @@ from refua_regulatory.models import (
     ModelProvenance,
 )
 
+LINEAGE_GRAPH_VERSION = "1.0.0"
+
 
 def build_lineage_graph(
     *,
@@ -180,7 +182,7 @@ def build_lineage_graph(
                 )
 
     return {
-        "graph_version": "1.0.0",
+        "graph_version": LINEAGE_GRAPH_VERSION,
         "campaign_run_id": campaign_run_id,
         "nodes": nodes,
         "edges": edges,

@@ -25,6 +25,7 @@ def build_evidence_bundle_from_payload(
     checklist_templates: list[str] | None = None,
     checklist_strict: bool = False,
     checklist_require_no_manual_review: bool = False,
+    provenance_include_sensitive_details: bool = False,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Build a regulatory evidence bundle from an in-memory campaign payload."""
@@ -55,6 +56,7 @@ def build_evidence_bundle_from_payload(
             checklist_templates=checklist_templates,
             checklist_strict=checklist_strict,
             checklist_require_no_manual_review=checklist_require_no_manual_review,
+            provenance_include_sensitive_details=provenance_include_sensitive_details,
             overwrite=overwrite,
         )
     finally:

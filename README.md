@@ -19,7 +19,7 @@ It helps teams follow drug regulation processes by turning campaign decisions an
 
 ```bash
 cd refua-regulatory
-pip install -e .
+pip install -e ".[dev,test]"
 ```
 
 ## CLI
@@ -75,6 +75,15 @@ refua-regulatory build \
   --campaign-run artifacts/kras_campaign_run.json \
   --output-dir artifacts/evidence/kras_run_001 \
   --no-checklist
+```
+
+Include machine-identifying provenance fields only when you need them:
+
+```bash
+refua-regulatory build \
+  --campaign-run artifacts/kras_campaign_run.json \
+  --output-dir artifacts/evidence/kras_run_001 \
+  --include-sensitive-provenance
 ```
 
 ### Verify a bundle
@@ -137,12 +146,15 @@ print(manifest["bundle_id"], verification.ok)
 - Data provenance is loaded from explicit manifest paths (`--data-manifest`).
 - `refua-data` parquet manifests are parsed directly for dataset IDs, versions, source URLs, and SHA256 checksums.
 - Model provenance is inferred from executed tool outputs and optional CLI overrides (`--model-name`, `--model-version`).
+- Campaign run IDs are derived deterministically from payload content unless the run payload provides an explicit `campaign_run_id` or `run_id`.
+- Hostname and absolute git root are omitted from execution provenance by default; enable them with `--include-sensitive-provenance` when required for internal audits.
 
 ## Test
 
 ```bash
 cd refua-regulatory
 python -m pytest -q
+python -Im build
 ```
 
 ## Notes

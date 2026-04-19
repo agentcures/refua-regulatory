@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from refua_regulatory import checklist as checklist_module
 from refua_regulatory.bundle import build_evidence_bundle, verify_evidence_bundle
+from refua_regulatory.utils import sha256_file
 
 
 def test_build_and_verify_bundle(
@@ -157,3 +159,69 @@ def test_build_strict_checklist_failure_still_writes_consistent_bundle(
 
     verification = verify_evidence_bundle(output_dir)
     assert verification.ok
+
+
+def test_verify_detects_semantic_manifest_tampering_after_checksum_rewrite(
+    sample_campaign_run_file: Path,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "bundle"
+    build_evidence_bundle(
+        campaign_run_path=sample_campaign_run_file,
+        output_dir=output_dir,
+        include_checklists=False,
+    )
+
+    manifest_path = output_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = "999.0.0"
+    manifest["artifact_count"] = 999
+    manifest["model_count"] = 999
+    manifest["data_count"] = 999
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    checksum_lines: list[str] = []
+    for path in sorted(
+        candidate
+        for candidate in output_dir.rglob("*")
+        if candidate.is_file() and candidate.name != "checksums.sha256"
+    ):
+        checksum_lines.append(f"{sha256_file(path)}  {path.relative_to(output_dir)}")
+    output_dir.joinpath("checksums.sha256").write_text(
+        "\n".join(checksum_lines) + "\n",
+        encoding="utf-8",
+    )
+
+    verification = verify_evidence_bundle(output_dir)
+    assert not verification.ok
+    assert any("Unsupported manifest schema_version" in item for item in verification.errors)
+    assert any("artifact_count mismatch" in item for item in verification.errors)
+    assert any("model_count mismatch" in item for item in verification.errors)
+    assert any("data_count mismatch" in item for item in verification.errors)
+
+
+def test_build_multiple_checklists_reuses_single_verification_pass(
+    sample_campaign_run_file: Path,
+    sample_data_manifest_file: Path,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "bundle"
+    verification_calls = 0
+    original_verify = checklist_module.verify_evidence_bundle
+
+    def counting_verify(bundle_dir: Path):
+        nonlocal verification_calls
+        verification_calls += 1
+        return original_verify(bundle_dir)
+
+    monkeypatch.setattr(checklist_module, "verify_evidence_bundle", counting_verify)
+
+    build_evidence_bundle(
+        campaign_run_path=sample_campaign_run_file,
+        output_dir=output_dir,
+        data_manifest_paths=[sample_data_manifest_file],
+        checklist_templates=["core", "fda_cder_ai_ml"],
+    )
+
+    assert verification_calls == 1

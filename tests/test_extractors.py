@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from refua_regulatory.extractors import (
     extract_decisions_from_campaign,
     extract_model_provenance,
@@ -56,3 +58,19 @@ def test_extract_model_provenance_override_when_results_absent() -> None:
     assert len(models) == 1
     assert models[0].model_name == "custom-model"
     assert models[0].model_version == "2026.02.16"
+
+
+def test_infer_campaign_run_id_is_independent_of_source_path() -> None:
+    payload = {
+        "objective": "same objective",
+        "planner_response_text": '{"calls": ["same"]}',
+        "results": [{"tool": "refua_validate_spec", "args": {}, "output": {"valid": True}}],
+    }
+
+    run_id_a = infer_campaign_run_id(payload, source_path=Path("/tmp/a.json"))
+    run_id_b = infer_campaign_run_id(
+        payload,
+        source_path=Path("/var/folders/random/b.json"),
+    )
+
+    assert run_id_a == run_id_b

@@ -76,3 +76,37 @@ def test_comprehensive_template_has_manual_review_sections(
     summary = report["summary"]
     assert summary["failed"] == 0
     assert summary["manual_review"] >= 1
+
+
+def test_validation_first_policy_uses_executed_tool_order(tmp_path: Path) -> None:
+    payload = {
+        "objective": "Execution order check",
+        "plan": {
+            "calls": [
+                {"tool": "refua_validate_spec", "args": {}},
+                {"tool": "refua_fold", "args": {}},
+            ]
+        },
+        "results": [
+            {
+                "tool": "refua_fold",
+                "args": {},
+                "output": {"backend": "refua", "warnings": []},
+            }
+        ],
+    }
+    campaign_run = tmp_path / "campaign.json"
+    campaign_run.write_text(__import__("json").dumps(payload) + "\n", encoding="utf-8")
+
+    bundle_dir = tmp_path / "bundle"
+    build_evidence_bundle(
+        campaign_run_path=campaign_run,
+        output_dir=bundle_dir,
+        include_checklists=False,
+    )
+
+    report = evaluate_regulatory_checklist(bundle_dir, template="core")
+    item = next(entry for entry in report["items"] if entry["id"] == "validation_first_policy")
+
+    assert item["status"] == "fail"
+    assert "first_executed_tool=refua_fold" in item["evidence"]
