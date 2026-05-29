@@ -278,7 +278,7 @@ def load_data_provenance_from_manifests(
 
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             warnings.append(f"Failed to parse data manifest {path}: {exc}")
             continue
 

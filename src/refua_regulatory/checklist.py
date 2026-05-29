@@ -258,7 +258,7 @@ def _safe_read_json_object(path: Path) -> dict[str, Any] | None:
         return None
     try:
         return read_json_object(path)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 

@@ -106,7 +106,9 @@ def test_validation_first_policy_uses_executed_tool_order(tmp_path: Path) -> Non
     )
 
     report = evaluate_regulatory_checklist(bundle_dir, template="core")
-    item = next(entry for entry in report["items"] if entry["id"] == "validation_first_policy")
+    item = next(
+        entry for entry in report["items"] if entry["id"] == "validation_first_policy"
+    )
 
     assert item["status"] == "fail"
     assert "first_executed_tool=refua_fold" in item["evidence"]

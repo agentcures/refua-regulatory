@@ -206,9 +206,11 @@ def build_evidence_bundle(
         execution_provenance=execution,
         checklist_reports=(),
         checklist_summary={},
-        warnings=tuple([*data_warnings, *artifact_warnings]),
+        warnings=(*data_warnings, *artifact_warnings),
     )
-    inventory.write_json(output_dir / "manifest.json", to_plain_data(bootstrap_manifest))
+    inventory.write_json(
+        output_dir / "manifest.json", to_plain_data(bootstrap_manifest)
+    )
     inventory.write_checksums()
 
     checklist_reports: tuple[str, ...] = ()
@@ -248,7 +250,7 @@ def build_evidence_bundle(
         execution_provenance=execution,
         checklist_reports=checklist_reports,
         checklist_summary=checklist_summary,
-        warnings=tuple([*data_warnings, *artifact_warnings]),
+        warnings=(*data_warnings, *artifact_warnings),
     )
     inventory.write_json(output_dir / "manifest.json", to_plain_data(final_manifest))
     inventory.write_checksums()
@@ -281,7 +283,7 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
     if manifest_path.exists():
         try:
             manifest_payload = read_json_object(manifest_path)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"Invalid manifest.json: {exc}")
 
     checksum_path = bundle_dir / "checksums.sha256"
@@ -289,7 +291,7 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
     if checksum_path.exists():
         try:
             checksum_entries = _parse_checksum_file(checksum_path)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(f"Invalid checksums.sha256: {exc}")
 
     declared_checksum_paths: set[str] = set()
@@ -354,7 +356,9 @@ def verify_evidence_bundle(bundle_dir: Path) -> VerificationResult:
                     manifest_is_valid = False
                     break
                 if not _is_safe_relative_path(rel_name):
-                    errors.append(f"manifest.files contains invalid relative path: {rel_name}")
+                    errors.append(
+                        f"manifest.files contains invalid relative path: {rel_name}"
+                    )
                     manifest_is_valid = False
                     continue
                 manifest_files.add(rel_name)
@@ -797,12 +801,13 @@ def _validate_manifest_metadata(
             errors.append(f"manifest.{field_name} must be a non-empty string")
 
     source_rel_path = manifest_payload.get("source_rel_path")
-    if not isinstance(source_rel_path, str) or not _is_safe_relative_path(source_rel_path):
+    if not isinstance(source_rel_path, str) or not _is_safe_relative_path(
+        source_rel_path
+    ):
         errors.append("manifest.source_rel_path must be a safe relative path")
     elif not bundle_dir.joinpath(source_rel_path).is_file():
         errors.append(
-            "manifest.source_rel_path points to a missing file: "
-            f"{source_rel_path}"
+            "manifest.source_rel_path points to a missing file: " f"{source_rel_path}"
         )
 
     for field_name in ("artifact_count", "model_count", "data_count"):
@@ -855,7 +860,9 @@ def _validate_manifest_metadata(
     else:
         for rel_path in checklist_reports:
             if not isinstance(rel_path, str) or not _is_safe_relative_path(rel_path):
-                errors.append("manifest.checklist_reports must contain safe relative paths")
+                errors.append(
+                    "manifest.checklist_reports must contain safe relative paths"
+                )
                 continue
             if not bundle_dir.joinpath(rel_path).is_file():
                 errors.append(
@@ -885,7 +892,7 @@ def _validate_lineage_consistency(
 
     try:
         lineage_payload = read_json_object(lineage_path)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         errors.append(f"Invalid lineage.json: {exc}")
         return
 

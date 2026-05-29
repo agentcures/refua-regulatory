@@ -153,7 +153,9 @@ def test_build_strict_checklist_failure_still_writes_consistent_bundle(
     else:
         raise AssertionError("Expected checklist strict mode to fail")
 
-    manifest = json.loads(output_dir.joinpath("manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        output_dir.joinpath("manifest.json").read_text(encoding="utf-8")
+    )
     assert "checklists/core.json" in manifest["checklist_reports"]
     assert "checklists/core.md" in manifest["checklist_reports"]
 
@@ -194,7 +196,9 @@ def test_verify_detects_semantic_manifest_tampering_after_checksum_rewrite(
 
     verification = verify_evidence_bundle(output_dir)
     assert not verification.ok
-    assert any("Unsupported manifest schema_version" in item for item in verification.errors)
+    assert any(
+        "Unsupported manifest schema_version" in item for item in verification.errors
+    )
     assert any("artifact_count mismatch" in item for item in verification.errors)
     assert any("model_count mismatch" in item for item in verification.errors)
     assert any("data_count mismatch" in item for item in verification.errors)

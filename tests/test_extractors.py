@@ -64,7 +64,9 @@ def test_infer_campaign_run_id_is_independent_of_source_path() -> None:
     payload = {
         "objective": "same objective",
         "planner_response_text": '{"calls": ["same"]}',
-        "results": [{"tool": "refua_validate_spec", "args": {}, "output": {"valid": True}}],
+        "results": [
+            {"tool": "refua_validate_spec", "args": {}, "output": {"valid": True}}
+        ],
     }
 
     run_id_a = infer_campaign_run_id(payload, source_path=Path("/tmp/a.json"))
